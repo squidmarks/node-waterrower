@@ -1,9 +1,10 @@
-"use strict"; 
+"use strict";
 
 // Read Waterrower
 //
 // Initialise
-var com = require("serialport");
+//var com = require("serialport");  
+var com = require('serialport');
 var response = {device:'unknown', connected:false};
 var values = [];
 var conn;
@@ -11,15 +12,14 @@ var portname = "NULL";
 var type = process.env.TYPE || 'wr5';
 var debug = process.env.DEBUG?console.log:function(){};
 var state = 'closed'
+var pingCount=0;
+var TOTAL_STROKE_COUNT=0;
+
 // State of the USB Serial connection
 var READ_RATE = 800;// frequency at which we query the S4/S5 in ms
 var BAUD_RATE = 19200;// baud rate of the S4/S5 com port connection
 
 console.log(process.env.DEBUG)
-
-exports.readStrokeCount = function(callback) { //TODO: async callback with (err, value) arguments
-return values["STROKE_COUNT"];
-}
 
 exports.readTotalSpeed = function(callback) { //TODO: async callback with (err, value) arguments
 return values["TOTAL_SPEED"];
@@ -29,15 +29,89 @@ exports.readAverageSpeed = function(callback) { //TODO: async callback with (err
 return values["AVERAGE_SPEED"];
 }
 
+exports.readStrokeCount = function(callback) { //TODO: async callback with (err, value) arguments
+return values["STROKE_COUNT"];
+}
+
+exports.readStrokeAverage = function(callback) { //TODO: async callback with (err, value) arguments
+return values["STROKE_AVERAGE"];
+}
+
+exports.readStrokePull = function(callback) { //TODO: async callback with (err, value) arguments
+return values["STROKE_PULL"];
+}
+
 exports.readDistance = function(callback) { //TODO: async callback with (err, value) arguments
 return values["DISTANCE"];
+}
+
+exports.readTotalDistance = function(callback) { //TODO: async callback with (err, value) arguments
+return values["TOTAL_DISTANCE"];
 }
 
 exports.readHeartRate = function(callback) { //TODO: async callback with (err, value) arguments
 return values["HEARTRATE"];
 }
 
+exports.pingsRecd = function(callback) { //TODO: async callback with (err, value) arguments
+return pingCount;
+}
 
+exports.totalStrokeCount = function(callback) { //TODO: async callback with (err, value) arguments
+return TOTAL_STROKE_COUNT;
+}
+
+exports.resetTotalStrokeCount = function(callback) { //TODO: async callback with (err, value) arguments
+return TOTAL_STROKE_COUNT=0;
+}
+
+exports.resetWR = function() {
+    return write("RESET");
+};
+
+function asHex(aNum){
+	return ("0000" + aNum.toString(16)).substr(-4).toUpperCase();
+}
+
+exports.startWRInterval = function (aDuration, aUnits) {
+	var unitID;
+	var convertedDistance;
+    switch (aUnits.toUpperCase()){
+				case "SECONDS": {
+			    	write("WSU"+asHex(aDuration));
+						break;
+				}
+				case "MINUTES": {
+			    	write("WSU"+asHex(aDuration*60));
+						break;
+				}
+				case "METERS": {
+						unitID="1";
+						convertedDistance=aDuration;
+						write("WSI"+unitID+asHex(convertedDistance));
+						break;
+				}
+				case "MILES": {
+          	unitID="2";
+            convertedDistance=aDuration*1608; //convert miles to meters
+    				write("WSI"+unitID+asHex(convertedDistance));
+            break;
+        }
+        case "KMS": {
+          	unitID="3";
+            convertedDistance=aDuration*1000; //convert kms to meters
+    				write("WSI"+unitID+asHex(convertedDistance));
+            break;
+        }
+        case "STROKES": {
+          	unitID="4";
+    				write("WSI"+unitID+asHex(aDuration));
+            break;
+        }
+    }
+    //console.log("WSI"+unitID+asHex(convertedDistance));
+    //write("WSI"+unitID+asHex(convertedDistance));
+}
 
 var getState = function() {
   return (state);
@@ -73,7 +147,8 @@ var getPort = function() {
     ports.forEach(function(port) {  
       debug("com name " + port.comName);
       debug("port ID " + port.pnpId);
-      portname = ports[i].comName;
+//      portname = ports[i].comName;
+        portname ="/dev/ttyACM0";
       i++;
     });
   });
@@ -126,7 +201,7 @@ var read = function(callback) { // this should be 'setup'
 
       debug("in read connecting to " + portname);
       state = "connecting";
-	  conn = new com.SerialPort(portname, {
+	  conn = new com(portname, {
 	    baudrate: BAUD_RATE, disconnectedCallback:function () { callback("disconnected") },
 	    parser: com.parsers.readline("\n")
 	  });
@@ -150,9 +225,11 @@ var read = function(callback) { // this should be 'setup'
 	    debug('in read>' + data.trim() + "<");
 	    state = "read";
 	    if (data.substring(0,1) == "P") {
-	      data = "PULSE";
+//	      data = "PULSE";
+	      data = "PING";
 	    }
 	    else if (data.substring(0,1) == "S") {
+				if (data.substring(0,2) == "SE") ++TOTAL_STROKE_COUNT;
 	      data = "STROKE";
 	    }
 	    else {
@@ -160,6 +237,7 @@ var read = function(callback) { // this should be 'setup'
 	    }
 	    switch (data) {
 	      case "PING":
+				++pingCount;
 		break;
 	      case "PULSE":
 		break;
@@ -193,8 +271,8 @@ var nextMessage = "USB";
 var arduino ={
 	"USB":{"response":"CONNECTED","next":"IDS14010"},
 	"IDS140":{"response":"STROKE_COUNT","next":"IDD14811"},
-	"IDD148":{"response":"TOTAL_SPEED","next":"IDD14A12"},
-	"IDD14A":{"response":"AVERAGE_SPEED","next":"IDD05713"},
+	"IDD148":{"response":"STROKE_AVERAGE","next":"IDD14A12"},
+	"IDD14A":{"response":"STROKE_PULL","next":"IDD05713"},
 	"IDD057":{"response":"DISTANCE","next":"IDS1A005"},
 	"IDS1A0":{"response":"HEARTRATE","next":"IDS14010"}
 	};
@@ -202,19 +280,25 @@ var arduino ={
 
 var wr5 ={
 	"_WR_":{"response":"CONNECTED","next":"IRD140"},
-	"IDD140":{"response":"STROKE_COUNT","next":"IRD148"},
+	"IDD140":{"response":"STROKE_COUNT","next":"IRS142"},
+	"IDS142":{"response":"STROKE_AVERAGE","next":"IRS143"},
+	"IDS143":{"response":"STROKE_PULL","next":"IRD057"},
+	"IDD057":{"response":"DISTANCE","next":"IRD081"},
+	"IDD081":{"response":"TOTAL_DISTANCE","next":"IRS1A0"},
+	"IDS1A0":{"response":"HEARTRATE","next":"IRD148"},
 	"IDD148":{"response":"TOTAL_SPEED","next":"IRD14A"},
-	"IDD14A":{"response":"AVERAGE_SPEED","next":"IRD057"},
-	"IDD057":{"response":"DISTANCE","next":"IRS1A0"},
-	"IDS1A0":{"response":"HEARTRATE","next":"IRD140"},
+	"IDD14A":{"response":"AVERAGE_SPEED","next":"IRD140"},
 	"AKR":{"response":"RESET","next":"IRD140"}
 	};
 
 values["STROKE_COUNT"] = 0;
+values["STROKE_AVERAGE"] = 0;
+values["STROKE_PULL"] = 0;
+values["DISTANCE"] = 0;
+values["TOTAL_DISTANCE"] = 0;
+values["HEARTRATE"] = 0;
 values["TOTAL_SPEED"] = 0;
 values["AVERAGE_SPEED"] = 0;
-values["DISTANCE"] = 0;
-values["HEARTRATE"] = 0;
 
 var readMessage = function(message) {
     var response = {device:'unknown', parameters:[], connected:false};
