@@ -8,7 +8,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git@github.com:jamesnesfield/node-waterrower.git"
+    "url": "git@github.com:squidmarks/node-waterrower.git"
   },
   "keywords": [
     "waterrower, nodejs, node"
