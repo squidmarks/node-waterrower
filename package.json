@@ -20,6 +20,6 @@
   },
   "homepage": "https://github.com/jamesnesfield/node-waterrower",
   "dependencies": {
-       "serialport": "^2.0.0"
+       "serialport": "^4.0.7"
   }
 }
